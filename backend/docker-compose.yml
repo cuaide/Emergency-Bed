@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nmc-postgres
+    environment:
+      POSTGRES_DB: lifeserver
+      POSTGRES_USER: azureuser  
+      POSTGRES_PASSWORD: "${PGPASSWORD}"
+      TZ: Asia/Seoul
+    ports:
+      - "5432"
+    volumes:
+      - nmc-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U azureuser -d lifeserver"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  nmc-pgdata:

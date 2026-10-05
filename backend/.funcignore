@@ -1,0 +1,17 @@
+.git*
+.venv
+venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+tests/
+scripts/
+local.settings.json
+docker-compose.yml
+README.md
+.env
+.env.*
+
+# 개발 전용 설정. Oryx 빌드가 requirements.txt 대신 이 파일을 보고
+# 프로젝트를 패키지로 빌드하려는 것을 막는다.
+pyproject.toml
