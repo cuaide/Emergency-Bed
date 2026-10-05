@@ -1,10 +1,3 @@
-"""Tmap 경로/교통 조회.
-
-수집 파이프라인에 넣지 않고 FastAPI 요청 시점에만 호출한다.
-출발지가 사용자마다 달라 미리 적재할 수 없고, 호출 쿼터도 아껴야 하기 때문이다.
-그래서 거리순 상위 후보 몇 곳에만 경로를 붙인다.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -21,20 +14,11 @@ logger = logging.getLogger(__name__)
 
 ROUTE_PATH = "/tmap/routes"
 POI_PATH = "/tmap/pois"
-
-# 같은 출발지/목적지 조합을 다시 묻지 않는 짧은 캐시.
-# 프론트가 반경 10→20→40km 로 재검색하고(app.js loadRecommendations) 병상 SSE 갱신마다
-# 다시 부르기 때문에, 검색 한 번이 30회 넘는 경로 호출로 불어나 하루 쿼터를 태우고 있었다.
-# 교통 상황은 2분 안에 의미 있게 바뀌지 않으므로 그 사이 중복은 전부 캐시로 막는다.
 ROUTE_CACHE_TTL_S = 120
 ROUTE_CACHE_SIZE = 512
-# GPS 좌표는 가만히 있어도 미세하게 흔들린다. 4자리(약 11m)로 맞춰 같은 출발지로 본다.
 COORD_PRECISION = 4
 
-# 자동차 경로 탐색 옵션 (0: 교통최적+추천)
 SEARCH_OPTION_RECOMMENDED = "0"
-
-# geometry.traffic 배열의 혼잡도 코드 (Tmap 자동차 경로안내 API 문서 기준)
 CONGESTION_LABELS: dict[int, str] = {
     0: "정보없음",
     1: "원활",
@@ -42,7 +26,7 @@ CONGESTION_LABELS: dict[int, str] = {
     3: "지체",
     4: "정체",
 }
-JAMMED_THRESHOLD = 3  # 지체(3) 이상을 "막힘"으로 본다
+JAMMED_THRESHOLD = 3  
 
 
 class TmapError(RuntimeError):
@@ -70,11 +54,6 @@ def fetch_route(
     end_longitude: float,
     session: requests.Session | None = None,
 ) -> dict[str, Any]:
-    """실시간 교통을 반영한 자동차 경로 요약을 반환한다 (ROUTE_CACHE_TTL_S 동안 캐시).
-
-    반환: {"path", "path_congestion", "distance_m", "duration_s", "duration_min", ...}
-    반환 dict 는 캐시와 공유되므로 호출한 쪽에서 수정하지 않는다.
-    """
     if session is not None:
         return _request_route(
             start_latitude, start_longitude, end_latitude, end_longitude, session
@@ -87,8 +66,6 @@ def fetch_route(
         round(end_longitude, COORD_PRECISION),
     )
 
-
-# lru_cache 는 예외를 캐시하지 않으므로, 쿼터가 풀리면 다음 호출이 그대로 다시 나간다.
 @lru_cache(maxsize=ROUTE_CACHE_SIZE)
 def _cached_route(
     _bucket: int,
@@ -179,11 +156,6 @@ def _congestion_segments(features: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def _route_path(features: list[dict[str, Any]]) -> tuple[list[list[float]], list[dict[str, Any]]]:
-    """LineString 좌표를 순서대로 이어 붙이고, traffic 구간을 그 인덱스 기준으로 다시 매긴다.
-
-    traffic 원소는 [시작idx, 끝idx, 혼잡도, 속도]이며 인덱스는 해당 feature 안에서만
-    유효하다. 지도에 한 줄로 그리려면 전체 좌표 배열 기준으로 옮겨야 한다.
-    """
     points: list[list[float]] = []
     spans: list[dict[str, Any]] = []
     for feature in features:
@@ -199,7 +171,6 @@ def _route_path(features: list[dict[str, Any]]) -> tuple[list[list[float]], list
             if len(quad) < 4:
                 continue
             start, end, congestion = int(quad[0]), int(quad[1]), int(quad[2])
-            # 좌표 범위를 벗어난 인덱스는 버린다 (Tmap이 가끔 끝 인덱스를 넘겨 준다).
             start = max(0, min(start, len(coords) - 1))
             end = max(start, min(end, len(coords) - 1))
             spans.append({"start": base + start, "end": base + end, "congestion": congestion})
@@ -207,7 +178,6 @@ def _route_path(features: list[dict[str, Any]]) -> tuple[list[list[float]], list
 
 
 def parse_route(body: dict[str, Any]) -> dict[str, Any]:
-    """Tmap 응답에서 경로 요약 + 구간별 혼잡도를 뽑는다."""
     features = body.get("features") or []
     if not features:
         raise TmapError("Tmap 응답에 경로가 없습니다.")
@@ -242,10 +212,6 @@ def parse_route(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def search_poi(keyword: str, *, session: requests.Session | None = None) -> dict[str, Any]:
-    """장소명으로 좌표를 찾는다 (첫 번째 검색 결과 사용).
-
-    반환: {"name", "latitude", "longitude"}
-    """
     settings = get_settings()
     if not settings.tmap_app_key:
         raise TmapError("TMAP_APP_KEY 환경 변수가 비어 있습니다.")
@@ -265,8 +231,6 @@ def search_poi(keyword: str, *, session: requests.Session | None = None) -> dict
     try:
         response = session.get(url, params=params, headers=headers, timeout=settings.tmap_timeout)
         if response.status_code == 429:
-            # 여기서 일반 오류로 뭉개면 화면에 "그 주소를 찾지 못했어요"가 떠서,
-            # 실제로는 한도 문제인데 사용자가 주소만 계속 고쳐 입력하게 된다.
             raise TmapQuotaError("Tmap 장소 검색 한도를 초과했습니다 (QUOTA_EXCEEDED).")
         response.raise_for_status()
         body = response.json()
@@ -280,7 +244,6 @@ def search_poi(keyword: str, *, session: requests.Session | None = None) -> dict
 
 
 def parse_poi(body: dict[str, Any], keyword: str) -> dict[str, Any]:
-    """Tmap POI 검색 응답에서 첫 결과의 이름/좌표만 뽑는다."""
     pois = ((body.get("searchPoiInfo") or {}).get("pois") or {}).get("poi") or []
     if not pois:
         raise TmapError(f"'{keyword}'에 대한 검색 결과가 없습니다.")
@@ -300,12 +263,6 @@ def attach_routes(
     start_longitude: float,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """후보 목록 상위 N곳에 경로를 붙이고 소요시간순으로 정렬한다.
-
-    개별 후보의 조회 실패는 route=None으로 남기고 전체 응답은 살린다.
-    경로를 못 구한 후보는 목록 끝으로 밀린다.
-    다만 쿼터 초과(TmapQuotaError)는 후보 전체가 똑같이 실패하는 상황이라 그대로 올린다.
-    """
     settings = get_settings()
     max_candidates = limit or settings.tmap_max_candidates
     targets = candidates[:max_candidates]

@@ -1,14 +1,13 @@
 import logging
 import os
 from typing import List
-
 import azure.functions as func
 
 from app.collectors.emergency import (
     fetch_bed_status,
     fetch_hospitals,
     save_bed_status,
-    save_hospitals,
+    save_hospitals
 )
 from app.collectors.weather import (
     NoTargetGridError,
@@ -16,7 +15,7 @@ from app.collectors.weather import (
     fetch_weather_current,
     fetch_weather_forecast,
     save_weather_current,
-    save_weather_forecast,
+    save_weather_forecast
 )
 from app.eventhub import decode_event_hub_messages, to_event_messages
 
@@ -33,17 +32,16 @@ WEATHER_FORECAST_SCHEDULE = os.environ.get(
     schedule=BED_COLLECT_SCHEDULE,
     arg_name="timer",
     run_on_startup=False,
-    use_monitor=True,
+    use_monitor=True
 )
 @app.event_hub_output(
     arg_name="output_events",
     event_hub_name="%BED_EVENT_HUB_NAME%",
-    connection="EventHubConnection",
+    connection="EventHubConnection"
 )
 def collect_beds_timer(
     timer: func.TimerRequest,
-    output_events: func.Out[List[str]],
-) -> None:
+    output_events: func.Out[List[str]]) -> None:
     """공공 API에서 실시간 병상을 수집해 Event Hub로 흘려보낸다 (DB 적재 없음)."""
     if timer.past_due:
         logging.warning("collect_beds_timer 실행이 지연되었습니다.")
@@ -66,7 +64,6 @@ def collect_beds_timer(
 )
 
 def save_beds_eventhub(events: List[func.EventHubEvent]) -> None:
-    """Event Hub 메시지를 검증하고 bed_status / bed_status_latest에 UPSERT한다."""
     rows = decode_event_hub_messages(events)
     if not rows:
         logging.warning("수신 이벤트 %d건 중 적재 가능한 메시지가 없습니다.", len(events))
@@ -88,10 +85,8 @@ def save_beds_eventhub(events: List[func.EventHubEvent]) -> None:
     use_monitor=True,
 )
 def collect_hospitals_daily(timer: func.TimerRequest) -> None:
-    """기관 기본정보(좌표 포함)는 변동이 적으므로 Event Hub 없이 바로 적재한다."""
     rows = fetch_hospitals()
     saved = save_hospitals(rows)
-    # 새로 들어온 병원의 기상청 격자(nx, ny)를 채워 날씨 수집 대상에 포함시킨다.
     filled = backfill_hospital_grids()
     logging.info("기관 기본정보 수집=%d, DB 적재=%d, 격자 보정=%d", len(rows), saved, filled)
 
@@ -124,7 +119,6 @@ def collect_weather_current_timer(timer: func.TimerRequest) -> None:
     use_monitor=True,
 )
 def collect_weather_forecast_timer(timer: func.TimerRequest) -> None:
-    """단기예보를 병원 격자 단위로 수집해 PostgreSQL에 직접 적재한다."""
     if timer.past_due:
         logging.warning("collect_weather_forecast_timer 실행이 지연되었습니다.")
 
@@ -133,6 +127,6 @@ def collect_weather_forecast_timer(timer: func.TimerRequest) -> None:
     except NoTargetGridError as exc:
         logging.warning("날씨 예보 수집 건너뜀: %s", exc)
         return
-
+    
     saved = save_weather_forecast(rows)
     logging.info("날씨 예보 수집=%d, DB 적재=%d", len(rows), saved)

@@ -61,7 +61,6 @@ def main(argv: list[str] | None = None) -> int:
         try:
             rows = fetch(grids)
         except WeatherApiError as exc:
-            # 격자 없음 / 키 없음 / API 오류 모두 트레이스백 없이 한 줄로 알린다.
             print(f"오류: {exc}", file=sys.stderr)
             return 1
         print(f"[{kind}] 수집 {len(rows)}건")

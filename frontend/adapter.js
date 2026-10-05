@@ -60,9 +60,9 @@ window.APP_ADAPTER = (() => {
     const dxKm = (lng - center.lng) * kmPerLng;
     const dyKm = (lat - center.lat) * kmPerLat;
 
-    // 중심에서 halfSpan 만큼 떨어진 지점이 화면 가장자리(±40%)에 오도록 스케일
+
     const x = 50 + (dxKm / halfSpan) * 40;
-    const y = 50 - (dyKm / halfSpan) * 40; // 화면 y축은 아래로 증가 → 부호 반전
+    const y = 50 - (dyKm / halfSpan) * 40; 
     if (!clampEdges) return { x, y };
     const clamp = v => Math.min(94, Math.max(6, v));
     return { x: clamp(x), y: clamp(y) };
@@ -75,7 +75,7 @@ window.APP_ADAPTER = (() => {
     return project(lat, lng, center, spanKm);
   }
 
-  /** 강수량(mm) → app.js 의 stabilityScore 가 쓰는 rainRisk 0/1/2 */
+
   function rainRiskFromMm(mm) {
     const v = num(mm) || 0;
     if (v >= 5) return 2;
@@ -83,7 +83,7 @@ window.APP_ADAPTER = (() => {
     return 0;
   }
 
-  /** 설정된 매핑대로 beds.* 를 채운다. 매핑이 null 인 항목은 null 로 남긴다. */
+
   function beds(row) {
     const fields = cfg().bedFields || {};
     const out = {};
@@ -135,7 +135,6 @@ window.APP_ADAPTER = (() => {
       .sort((a, b) => a.eta - b.eta || a.distanceKm - b.distanceKm);
   }
 
-  /** 강수 유무/종류 → app.js 의 icon() 이 그리는 아이콘 키. */
   function weatherIconKey(mm, label) {
     if (mm > 0 || /비|소나기/.test(label)) return 'rain';
     if (/눈/.test(label)) return 'snow';
@@ -166,10 +165,6 @@ window.APP_ADAPTER = (() => {
     };
   }
 
-  /**
-   * 병상 0 / 음수 판독을 화면 문구 하나로 정리한다.
-   * 음수는 '가용 없음'이 아니라 대기 인원 표기로 읽는다는 백엔드 정책을 그대로 따른다.
-   */
   function bedSignal(raw) {
     const signal = raw || {};
     const queued = signal.queued_beds || [];
@@ -198,12 +193,11 @@ window.APP_ADAPTER = (() => {
       unknown,
       queued: queued.map(q => ({ label: q.label, queue: num(q.queue) })),
       deprioritized: signal.deprioritized === true,
-      // 0~1. 병상 상태 때문에 가용성 점수를 얼마나 깎았는지.
+
       penalty: num(signal.penalty) || 0
     };
   }
 
-  /** 모드(일반/중증)와 가중치. 화면이 "무엇을 몇 % 봤는지" 그대로 보여줄 수 있게 한다. */
   function normalizeMode(payload) {
     const mode = payload && payload.mode;
     if (!mode) return null;
@@ -221,7 +215,7 @@ window.APP_ADAPTER = (() => {
     };
   }
 
-  /** 추천 6단계. 결과가 적을 때 그것이 고장이 아니라 필터 결과임을 보여 준다. */
+
   function normalizePipeline(payload) {
     return ((payload && payload.pipeline) || []).map(s => ({
       step: num(s.step) || 0,
@@ -258,9 +252,9 @@ window.APP_ADAPTER = (() => {
       grade,
       best: item.badge === 'Best',
       badge: item.badge || null,
-      // 백엔드가 "확인 필요"를 붙일지 직접 알려준다. 등급 문자열을 파싱하지 않는다.
+  
       confirmRequired: item.confirm_required === true,
-      // -6 이하(대기 과다)로 후순위로 밀린 기관.
+
       deprioritized: item.deprioritized === true,
       bedSignal: bedState,
       rank: num(item.rank) ?? 0,

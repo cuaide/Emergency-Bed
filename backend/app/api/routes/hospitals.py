@@ -1,5 +1,3 @@
-"""응급실 병상 조회 API. bed_status_latest만 읽는다 (공공 API 직접 호출 없음)."""
-
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +18,6 @@ from app.schemas import (
 from app.services import hospitals as hospital_service
 from app.services import tmap as tmap_service
 
-# EventHub → bed_status_latest 로 들어온 변경분을 폴링할 주기.
 _STREAM_POLL_S = 5.0
 
 router = APIRouter(prefix="/hospitals", tags=["hospitals"])
@@ -29,11 +26,6 @@ router = APIRouter(prefix="/hospitals", tags=["hospitals"])
 def _attach_routes_or_429(
     rows: list[dict], *, lat: float, lon: float, limit: int
 ) -> list[dict]:
-    """경로를 붙이되, 쿼터 초과는 429로 올린다.
-
-    조용히 route=null 만 내려보내면 프론트가 직선거리 추정으로 갈아타면서 "경로가 왜
-    안 나오지"만 남는다. 원인을 상태 코드로 드러내야 화면에서 안내할 수 있다.
-    """
     try:
         return tmap_service.attach_routes(
             rows, start_latitude=lat, start_longitude=lon, limit=limit
@@ -92,10 +84,6 @@ def nearby_hospitals(
     include_stale: bool = Query(default=True),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[BedStatusNearby]:
-    """좌표 기준 반경 내 응급실을 거리순으로 반환한다.
-
-    Tmap 경로/교통 조회는 이 응답의 상위 후보에만 붙이면 된다.
-    """
     rows = hospital_service.find_nearby(
         latitude=lat,
         longitude=lon,
@@ -120,11 +108,6 @@ def nearby_hospitals_with_routes(
     include_stale: bool = Query(default=True),
     limit: int = Query(default=5, ge=1, le=10, description="경로를 조회할 후보 수"),
 ) -> list[BedStatusRoute]:
-    """직선거리 상위 후보에만 Tmap을 호출하고, 실제 소요시간순으로 정렬한다.
-
-    직선거리가 가까워도 강을 건너거나 교통이 막히면 실제로는 더 오래 걸리므로,
-    최종 순위는 Tmap 소요시간으로 결정한다. 호출 쿼터를 아끼려 후보 수를 제한한다.
-    """
     if not tmap_service.is_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -156,11 +139,6 @@ def routes_for_hospitals(
     lon: float = Query(description="출발지 경도", ge=-180, le=180),
     hpids: str = Query(description="쉼표로 구분한 hpid (최대 5개)"),
 ) -> list[BedStatusRoute]:
-    """순위가 확정된 뒤 화면에 실제로 보여줄 기관에만 경로를 붙인다.
-
-    /nearby/routes 는 '가까운 N곳'에 경로를 붙이므로, 화상·외상처럼 멀리 있는 전문
-    병원이 1위가 되면 정작 그 병원에는 경로가 없다. 이 라우트는 대상을 직접 지정한다.
-    """
     if not tmap_service.is_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -171,7 +149,6 @@ def routes_for_hospitals(
     if not ids:
         return []
 
-    # 거리 계산이 이미 들어 있는 조회를 재사용한다 (BedStatusRoute 가 distance_km 를 요구).
     rows = hospital_service.find_nearby(
         latitude=lat,
         longitude=lon,
@@ -195,12 +172,6 @@ def summary() -> list[SidoSummary]:
 
 @router.get("/stream", summary="병상 실시간 갱신 스트림 (SSE)")
 async def stream_bed_updates() -> StreamingResponse:
-    """bed_status_latest 를 주기적으로 폴링해 바뀐 행만 이벤트로 내려준다.
-
-    프론트(api.js subscribeBedUpdates)가 EventSource 로 붙어 event.data 를
-    BedStatus 배열로 파싱하므로, 매 이벤트는 그 형태의 JSON 배열이어야 한다.
-    """
-
     async def events():
         since = datetime.now(timezone.utc)
         while True:
@@ -211,8 +182,6 @@ async def stream_bed_updates() -> StreamingResponse:
                 payload = [BedStatus.model_validate(row).model_dump(mode="json") for row in rows]
                 yield f"data: {json.dumps(payload)}\n\n"
             else:
-                # 변경분이 없어도 주석 이벤트를 흘려보낸다. yield 를 하지 않으면 끊긴
-                # 클라이언트를 영원히 감지하지 못해 이 태스크와 DB 커넥션이 남는다.
                 yield ": keep-alive\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream")

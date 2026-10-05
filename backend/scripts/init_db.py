@@ -1,8 +1,3 @@
-
-"""테이블 생성 스크립트.
-    python -m scripts.init_db
-"""
-
 from __future__ import annotations
 
 import logging

@@ -1,14 +1,3 @@
-"""기상청 단기예보 조회서비스 수집기.
-
-emergency.py와 같은 규칙으로 "API 호출/파싱"과 "DB 적재"를 분리한다.
-
-    fetch_weather_current(grids)  → save_weather_current(rows)
-    fetch_weather_forecast(grids) → save_weather_forecast(rows)
-
-수집 대상 격자는 hospitals 테이블에 적재된 병원 좌표에서 유도한다.
-병원이 몰려 있는 격자는 중복 제거되므로 호출 수가 병원 수보다 훨씬 적다.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -25,36 +14,30 @@ from app.grid import Grid, latlon_to_grid
 
 logger = logging.getLogger(__name__)
 
-PATH_CURRENT = "getUltraSrtNcst"  # 초단기실황
-PATH_FORECAST = "getVilageFcst"  # 단기예보
-
-# 단기예보 발표 시각 (매일 8회)
+PATH_CURRENT = "getUltraSrtNcst" 
+PATH_FORECAST = "getVilageFcst"  
 FORECAST_BASE_HOURS = (2, 5, 8, 11, 14, 17, 20, 23)
-
-# 실황: 매시 정각 관측, 매시 40분 이후 제공
 CURRENT_RELEASE_MINUTE = 40
-# 예보: 발표 시각 10분 이후 제공
 FORECAST_RELEASE_MINUTE = 10
 
-# 실황 카테고리 → 컬럼
 CURRENT_CATEGORIES = {
-    "T1H": "t1h",  # 기온(°C)
-    "RN1": "rn1",  # 1시간 강수량(mm)
-    "REH": "reh",  # 습도(%)
-    "WSD": "wsd",  # 풍속(m/s)
-    "PTY": "pty",  # 강수형태(코드)
-    "VEC": "vec",  # 풍향(deg)
+    "T1H": "t1h",  # Temperature (°C)
+    "RN1": "rn1",  # 1-hour precipitation (mm)
+    "REH": "reh",  # Humidity (%)
+    "WSD": "wsd",  # Wind speed (m/s)
+    "PTY": "pty",  # Precipitation type (code)
+    "VEC": "vec",  # Wind direction (deg)
 }
 
-# 예보 카테고리 → 컬럼
+# Forecast category → column
 FORECAST_CATEGORIES = {
-    "TMP": "tmp",  # 1시간 기온(°C)
-    "POP": "pop",  # 강수확률(%)
-    "PTY": "pty",  # 강수형태(코드)
-    "SKY": "sky",  # 하늘상태(코드)
-    "REH": "reh",  # 습도(%)
-    "WSD": "wsd",  # 풍속(m/s)
-    "PCP": "pcp",  # 1시간 강수량(문자열: "강수없음", "1.0mm" 등)
+    "TMP": "tmp",  # 1-hour temperature (°C)
+    "POP": "pop",  # Probability of precipitation (%)
+    "PTY": "pty",  # Precipitation type (code)
+    "SKY": "sky",  # Sky condition (code)
+    "REH": "reh",  # Humidity (%)
+    "WSD": "wsd",  # Wind speed (m/s)
+    "PCP": "pcp",  # 1-hour precipitation (string: "강수없음", "1.0mm", etc.)
 }
 
 INT_COLUMNS = {"pty", "sky", "pop"}
@@ -62,16 +45,16 @@ TEXT_COLUMNS = {"pcp"}
 
 
 class WeatherApiError(RuntimeError):
-    """기상청 API가 정상 응답(resultCode=00)을 주지 않은 경우."""
+    """Raised when the KMA API does not return a normal response (resultCode=00)."""
 
 
 # ---------------------------------------------------------------------------
-# 발표 시각 계산
+# Release time calculation
 # ---------------------------------------------------------------------------
 
 
 def current_base_datetime(now: datetime | None = None) -> datetime:
-    """지금 시점에 조회 가능한 초단기실황 발표 시각(정시)을 구한다."""
+    """Find the ultra-short-term observation release time (on the hour) available as of now."""
     now = (now or datetime.now(KST)).astimezone(KST)
     base = now.replace(minute=0, second=0, microsecond=0)
     if now.minute < CURRENT_RELEASE_MINUTE:
@@ -80,7 +63,7 @@ def current_base_datetime(now: datetime | None = None) -> datetime:
 
 
 def forecast_base_datetime(now: datetime | None = None) -> datetime:
-    """지금 시점에 조회 가능한 단기예보 발표 시각을 구한다."""
+    """Find the short-term forecast release time available as of now."""
     now = (now or datetime.now(KST)).astimezone(KST)
     candidate = now.replace(minute=0, second=0, microsecond=0)
 
@@ -90,7 +73,7 @@ def forecast_base_datetime(now: datetime | None = None) -> datetime:
             if released <= now:
                 return candidate
         candidate -= timedelta(hours=1)
-    # 도달할 수 없음 (24시간 안에 반드시 발표 시각이 있다)
+    # Unreachable (there is always a release time within 24 hours)
     raise WeatherApiError("단기예보 발표 시각을 계산하지 못했습니다.")
 
 
@@ -102,12 +85,12 @@ def _parse_fcst_datetime(date_text: str, time_text: str) -> datetime | None:
 
 
 # ---------------------------------------------------------------------------
-# 값 변환
+# Value conversion
 # ---------------------------------------------------------------------------
 
 
 def _to_number(column: str, value: Any) -> Any:
-    """카테고리별로 int / float / str 중 맞는 타입으로 변환한다."""
+    """Convert to the right type per category: int / float / str."""
     if value is None:
         return None
     text = str(value).strip()
@@ -119,8 +102,8 @@ def _to_number(column: str, value: Any) -> Any:
         number = float(text)
     except ValueError:
         return None
-    # 기상청은 결측을 -99, -998, -999 등으로 표기한다.
-    # 국내 실측값이 -90 아래로 내려가는 항목은 없으므로 이 선에서 자른다.
+    # KMA marks missing values as -99, -998, -999, etc.
+    # No item measured in Korea drops below -90, so cut off at that line.
     if number <= -90:
         return None
     if column in INT_COLUMNS:
@@ -129,7 +112,7 @@ def _to_number(column: str, value: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# API 호출
+# API calls
 # ---------------------------------------------------------------------------
 
 
@@ -139,7 +122,7 @@ def _request_items(
     settings: Settings,
     session: requests.Session,
 ) -> list[dict[str, Any]]:
-    """기상청 API 한 번 호출해 items 배열을 돌려준다 (JSON)."""
+    """Call the KMA API once and return the items array (JSON)."""
     url = f"{settings.weather_base_url}/{path}"
 
     for attempt in range(settings.api_retry + 1):
@@ -157,7 +140,7 @@ def _request_items(
     header = (payload.get("response") or {}).get("header") or {}
     result_code = str(header.get("resultCode") or "").strip()
     if result_code and result_code != "00":
-        # 03 = NO_DATA. 특정 격자에 자료가 없는 건 오류가 아니라 빈 결과로 취급한다.
+        # 03 = NO_DATA. No data for a particular grid is treated as an empty result, not an error.
         if result_code == "03":
             return []
         raise WeatherApiError(
@@ -170,7 +153,7 @@ def _request_items(
 
 
 def target_grids(limit: int | None = None) -> list[Grid]:
-    """hospitals 테이블 좌표에서 중복 없는 격자 목록을 만든다."""
+    """Build a de-duplicated list of grids from the coordinates in the hospitals table."""
     rows = db.fetch_all(
         """
         SELECT DISTINCT nx, ny
@@ -186,9 +169,9 @@ def target_grids(limit: int | None = None) -> list[Grid]:
 
 
 class NoTargetGridError(WeatherApiError):
-    """수집 대상 격자를 하나도 찾지 못한 경우.
+    """Raised when no grid to collect could be found.
 
-    조용히 0건으로 끝내면 원인을 찾기 어려워서 명시적으로 실패시킨다.
+    Silently finishing with 0 rows makes the cause hard to track down, so it fails explicitly.
     """
 
 
@@ -201,7 +184,7 @@ def _resolve_grids(grids: list[Grid] | list[tuple[int, int]] | None) -> list[Gri
     if resolved:
         return resolved
 
-    # 좌표는 있는데 격자만 비어 있는 경우(예전 방식으로 적재된 데이터)는 스스로 복구한다.
+    # If coordinates exist but grids are empty (data loaded the old way), recover automatically.
     if backfill_hospital_grids():
         resolved = target_grids(limit=settings.weather_max_grids)
         if resolved:
@@ -218,7 +201,7 @@ def fetch_weather_current(
     grids: list[Grid] | list[tuple[int, int]] | None = None,
     now: datetime | None = None,
 ) -> list[dict]:
-    """초단기실황을 조회해 격자별 1행으로 반환한다 (DB 접근은 격자 조회뿐)."""
+    """Fetch ultra-short-term observations and return one row per grid (the only DB access is the grid lookup)."""
     settings = get_settings()
     if not settings.weather_service_key:
         raise WeatherApiError("WEATHER_API_KEY / DATA_GO_KR_SERVICE_KEY 환경 변수가 비어 있습니다.")
@@ -266,7 +249,7 @@ def fetch_weather_forecast(
     grids: list[Grid] | list[tuple[int, int]] | None = None,
     now: datetime | None = None,
 ) -> list[dict]:
-    """단기예보를 조회해 (격자, 예보시각)별 1행으로 반환한다."""
+    """Fetch the short-term forecast and return one row per (grid, forecast time)."""
     settings = get_settings()
     if not settings.weather_service_key:
         raise WeatherApiError("WEATHER_API_KEY / DATA_GO_KR_SERVICE_KEY 환경 변수가 비어 있습니다.")
@@ -322,7 +305,7 @@ def fetch_weather_forecast(
 
 
 # ---------------------------------------------------------------------------
-# 저장
+# Storage
 # ---------------------------------------------------------------------------
 
 
@@ -336,7 +319,7 @@ def _valid_current(row: Any) -> bool:
 
 
 def save_weather_current(rows: list[dict]) -> int:
-    """실황을 weather_current에 UPSERT한다."""
+    """UPSERT observations into weather_current."""
     valid = [row for row in rows if _valid_current(row)]
     dropped = len(rows) - len(valid)
     if dropped:
@@ -347,7 +330,7 @@ def save_weather_current(rows: list[dict]) -> int:
 
 
 def save_weather_forecast(rows: list[dict]) -> int:
-    """예보를 weather_forecast에 UPSERT한다."""
+    """UPSERT forecasts into weather_forecast."""
     valid = [row for row in rows if _valid_current(row) and row.get("fcst_datetime") is not None]
     dropped = len(rows) - len(valid)
     if dropped:
@@ -358,7 +341,7 @@ def save_weather_forecast(rows: list[dict]) -> int:
 
 
 def backfill_hospital_grids() -> int:
-    """좌표는 있는데 nx/ny가 비어 있는 병원의 격자를 채운다."""
+    """Fill in grids for hospitals that have coordinates but empty nx/ny."""
     rows = db.fetch_all(
         """
         SELECT hpid, latitude, longitude

@@ -1,9 +1,5 @@
-"""날씨 조회 API. 적재된 weather_current / weather_forecast만 읽는다."""
-
 from __future__ import annotations
-
 from fastapi import APIRouter, HTTPException, Query, status
-
 from app.schemas import WeatherCoverage, WeatherCurrent, WeatherForecastPoint, WeatherResponse
 from app.services import weather as weather_service
 

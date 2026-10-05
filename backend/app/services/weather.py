@@ -7,7 +7,6 @@ from typing import Any
 from app import db
 from app.grid import Grid, latlon_to_grid
 
-# 기상청 코드 → 한글
 PTY_LABELS = {
     0: "없음",
     1: "비",
@@ -37,7 +36,6 @@ def resolve_grid(latitude: float, longitude: float) -> Grid:
 
 
 def get_current(nx: int, ny: int) -> dict[str, Any] | None:
-    """격자의 최신 실황 1건."""
     row = db.fetch_one(
         """
         SELECT nx, ny, base_datetime, t1h, rn1, reh, wsd, vec, pty, collected_at 
@@ -57,7 +55,6 @@ def get_current_by_latlon(latitude: float, longitude: float) -> dict[str, Any] |
 
 
 def list_forecast(nx: int, ny: int, *, hours: int = 24) -> list[dict[str, Any]]:
-    """격자의 향후 예보. 예보 시각별로 가장 최근 발표분만 남긴다."""
     rows = db.fetch_all(
         """
         SELECT DISTINCT ON (fcst_datetime)
@@ -82,7 +79,6 @@ def list_forecast_by_latlon(
 
 
 def get_current_for_hospital(hpid: str) -> dict[str, Any] | None:
-    """병원이 속한 격자의 최신 실황."""
     row = db.fetch_one(
         """
         SELECT w.nx, w.ny, w.base_datetime, w.t1h, w.rn1, w.reh, w.wsd, w.vec, w.pty,
@@ -99,7 +95,6 @@ def get_current_for_hospital(hpid: str) -> dict[str, Any] | None:
 
 
 def coverage() -> dict[str, Any]:
-    """날씨 적재 현황 (파이프라인 점검용)."""
     return db.fetch_one(
         """
         SELECT

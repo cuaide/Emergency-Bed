@@ -1,12 +1,8 @@
-# Azure Functions 로컬 설정 (실제 연결 문자열/키 포함 → 커밋 금지)
 local.settings.json
 .env
-
-# Functions 배포 산출물
 .python_packages/
 bin/
 obj/
 .azure/
-
 __pycache__
 .venv

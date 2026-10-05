@@ -23,11 +23,6 @@
     remove(k) { try { localStorage.removeItem(k); } catch {} }
   };
 
-  /**
-   * 지난 세션에 GPS 로 확인한 실제 위치. 좌표가 있는 것만 인정한다.
-   * 예전에는 '확인했다'는 플래그만 저장해서, 데모 좌표를 쓰면서도 확인된 위치처럼
-   * 취급돼 계속 테헤란로 123 이 출발지로 잡혔다.
-   */
   function savedLocation(){
     try {
       const v = JSON.parse(store.get('er_location') || 'null');
@@ -49,13 +44,11 @@
       record: store.get('er_consent_record') === '1',
       aiQuality: store.get('er_consent_ai_quality') === '1'
     },
-    // 지난 세션에 확인한 '실제' 위치가 있으면 그걸 출발지로 쓴다.
-    // data.js 의 기본 좌표(테헤란로 123)는 GPS 를 못 받았을 때만 쓰는 대체값이다.
+
     location: savedLocation() || { ...DATA.defaultLocation },
     locationConfirmed: !!savedLocation(),
     search: { symptoms:[], age:'', conscious:'', breathing:'', memo:'', transcript:'' },
     results: [], activeResult:'', selected:'', radiusKm:5, radiusExpanded:false, refreshedAt:new Date(), highRisk:false,
-    // 채점 모드: 'auto' | 'normal' | 'severe'. 백엔드 응답의 mode.key 로 확정된다.
     severity:'auto', intake:null, recommendationMeta:null,
     required: { bed:'er', bedLabel:'응급실 병상', equipment:[], unsupported:[] },
     chatAnswers: {}, refreshCount:0, selectedAmbulance:'',
@@ -163,17 +156,7 @@
     return state.required;
   }
 
-  /**
-   * 1단계 입력 구조화.
-   *
-   * 여기서 /intake(에이전트)를 기다리면 안 된다. Foundry 에이전트는 실측 20~22초라
-   * 검색 버튼을 누르고 결과가 나올 때까지 그만큼 더 걸리고, 프론트 타임아웃(12초)과
-   * serve.py 프록시(30초)에도 걸린다. 그래서 화면은 키워드로 프로파일을 잡아 넘기고,
-   * 최종 판정(프로파일·모드)은 추천 응답의 input/mode 로 되돌려 받는다
-   * (applyRecommendations 가 state.severity 를 그 값으로 덮어쓴다).
-   *
-   * 에이전트 판정이 필요한 곳은 AI 진단 화면이고, 그쪽은 /triage 를 따로 부른다.
-   */
+
   function structureSearchInput(){
     mapRequirement();
     detectHighRisk();
@@ -182,28 +165,13 @@
     return state.required;
   }
 
-  // 갱신 시각을 못 믿는 경우(adapter.js 가 999로 표시) 숫자를 그대로 찍지 않는다.
+
   function agoText(m){ return m>=999?'갱신 시각 미확인':`${m}분 전`; }
 
-  // 프론트 자체 채점기(scoreCandidate)는 걷어냈다. 백엔드 추천 엔진이 병상 0·음수를
-  // 단계적으로 감점하고 모드별 가중치를 적용하는데, 여기 남아 있던 옛 규칙은
-  // '병상 0이면 후보에서 제외'라 정반대였다. 점수는 /api/v1/recommendations 한 곳에서만 낸다.
 
-  /**
-   * 지도 축척은 실제 지도(Tmap)가 fitBounds 로 알아서 맞춘다.
-   * 예전에는 도식 지도용 %좌표를 여기서 다시 계산했지만, 손그림 지도를 걷어내면서 필요 없어졌다.
-   */
-
-  /**
-   * 점수·순위는 백엔드 추천 엔진(/api/v1/recommendations)이 계산한다.
-   * 예전에는 여기서 프론트가 따로 채점했는데, 백엔드 엔진이 들어오면서 같은 병원이
-   * 카드에서는 92점, 리포트에서는 75점으로 갈리는 문제가 생겨 한쪽으로 모았다.
-   */
   async function loadRecommendations({detail=false}={}) {
     structureSearchInput();
-    // 반경은 백엔드가 5 → 10 → 20km 로 스스로 넓힌다(A등급 3곳이 모이면 멈춘다).
-    // 예전에는 프론트가 10/20/40 을 돌려 가며 여러 번 불렀는데, 같은 조회를
-    // 세 번 반복하는 셈이라 느리고 결과의 radius_km 도 화면과 어긋났다.
+
     const payload=await API.fetchRecommendations({
       detail,
       profile:state.required.profile||null,
@@ -211,9 +179,6 @@
       severity:state.severity||'auto'
     });
     applyRecommendations(payload);
-    // 추천 엔진은 호출량을 줄이기 위해 거리순 일부 후보에만 먼저 Tmap 경로를 붙인다.
-    // 전문 자원 병원이 최종 추천에 뒤늦게 포함되면 경로가 없을 수 있으므로, 최종 3곳 중
-    // 누락된 병원만 다시 조회해 지도용 path/path_congestion을 반드시 보강한다.
     const missingRouteIds=state.results
       .filter(h=>!Array.isArray(h.raw?.route?.path)||h.raw.route.path.length<2)
       .map(h=>h.id);
@@ -241,7 +206,6 @@
       radiusKm:payload?.radius_km??null, evaluated:payload?.evaluated_count??null,
       excluded:payload?.excluded_count??null, notes:payload?.notes||[],
       resourceHolders:payload?.resource_holders||[],
-      // 슬라이드 21·22 - 어떤 모드로 어떤 순서를 거쳐 나온 결과인지 함께 보관한다.
       mode:A.normalizeMode(payload), pipeline:A.normalizePipeline(payload),
       radiusSteps:payload?.radius_steps||[],
       hasBest:payload?.has_best===true, bestId:payload?.best_hpid||null,
@@ -249,9 +213,6 @@
       disclaimer:payload?.disclaimer||''
     };
     if(state.recommendationMeta.mode) state.severity=state.recommendationMeta.mode.key;
-    // 추천 응답에 실린 날씨는 백엔드가 '경로·기상 안정성' 점수를 매길 때 쓴 바로 그 실황이다.
-    // 이걸 써야 결과 화면의 날씨 표시와 점수가 같은 시점을 가리킨다 (갱신 버튼은
-    // 추천만 다시 부르므로, 예전에는 병원 조회 때 받아 둔 옛 날씨가 계속 남아 있었다).
     if(payload?.weather?.current){
       const w=A.normalizeWeather(payload.weather);
       if(w) DATA.currentWeather=w;
@@ -363,8 +324,6 @@
   }
 
   function requestLocationConsent(after) {
-    // 동의를 이미 받았어도 곧장 GPS 로 가지 않는다. 데스크톱 GPS 는 오차가 km 단위라
-    // 주소 입력이 더 정확한 경우가 많은데, 예전에는 GPS 가 성공하면 주소로 바꿀 방법이 없었다.
     const consented=state.consents.location;
     const body=consented
       ? `<p>현재 위치는 브라우저가 알려주는 값이라 PC 에서는 오차가 수 km 까지 벌어질 수 있습니다. 정확한 출발지가 필요하면 주소를 직접 입력하세요.</p>`
@@ -381,18 +340,11 @@
   async function detectLocation(after) {
     toast('현재 위치를 확인하고 있어요.')
     try { const loc=await API.getCurrentLocation(); state.location={...state.location,...loc};state.locationConfirmed=true;rememberLocation(state.location);
-      // 오차가 크면 그 값으로 병원 거리를 재는 게 의미가 없다. 사용자에게 알리고 대안을 준다.
       if(Number(loc.accuracyMeters)>500) toast(`위치 오차가 ${loc.accuracy}입니다. 정확한 출발지는 '다시 찾기 → 주소 직접 입력'을 쓰세요.`);
       else toast('현재 위치를 확인했습니다.');
       if(after)after(); else route(); }
-    // 데모 위치는 저장하지 않는다. 저장하면 다음 실행 때도 GPS 를 안 물어보고 계속 데모 좌표를 쓴다.
     catch { modal({title:'자동 위치를 확인하지 못했어요',body:'<p>브라우저 위치 권한을 확인하거나 주소를 직접 입력해 주세요. 실제 좌표 없이 mock 위치로 검색하지 않습니다.</p>',primary:'주소 직접 입력',onPrimary:()=>manualLocation(after)}); }
   }
-  /**
-   * 입력한 주소를 실제 좌표로 바꿔 출발지로 삼는다.
-   * 좌표를 못 구하면 그대로 진행하지 않는다 — 예전에는 라벨만 입력값으로 바꾸고 좌표는
-   * data.js 기본값(테헤란로)을 써서, 엉뚱한 곳 기준으로 병원을 찾아 주고 있었다.
-   */
   async function applyManualLocation(keyword, after){
     const btn=modalRoot.querySelector('[data-manual-ok]');
     if(btn){ btn.disabled=true; btn.textContent='좌표를 찾는 중…'; }
@@ -409,7 +361,6 @@
       if(after)after(); else route();
     }catch(err){
       if(btn){ btn.disabled=false; btn.textContent='이 위치 사용'; }
-      // 한도 초과를 '못 찾음'으로 뭉개면 사용자가 주소만 계속 고쳐 쓰게 된다.
       const message=err&&err.status===429?'Tmap 호출 한도를 초과해 주소를 좌표로 바꿀 수 없습니다.'
         :err&&err.status===404?'그 주소를 찾지 못했어요. 더 구체적으로 입력해 주세요.'
         :'주소 검색에 실패했습니다. 잠시 후 다시 시도해 주세요.';
@@ -462,30 +413,18 @@
     try{r.start();}catch{activeRecognition=null;toast('음성 녹음을 시작하지 못했습니다.');}
   }
 
-  // 혼잡도 코드(0~4) → 색/이름. Tmap 기준: 0 정보없음 1 원활 2 서행 3 지체 4 정체
   const CONGESTION={0:{c:'#9aa0b4',t:'정보없음'},1:{c:'#22a06b',t:'원활'},2:{c:'#e2a63b',t:'서행'},3:{c:'#e4762f',t:'지체'},4:{c:'#d63b3b',t:'정체'}};
-  /** 선택된 병원의 실제 Tmap 경로를 혼잡도 색으로 그린다. 좌표가 없으면 빈 문자열. */
-  // 범례는 색상 키라 경로 유무와 무관하게 고정으로 둔다. 활성 병원에 맞춰 항목을 바꾸면
-  // 지도만 다시 그릴 때(setActive) 범례가 어긋난다.
   function congestionLegend(){
     return `<div class="map-legend">${[1,2,3,4].map(c=>`<span><i style="background:${CONGESTION[c].c}"></i>${CONGESTION[c].t}</span>`).join('')}</div>`;
   }
-  /**
-   * 지도 자리. 실제 지도(Tmap)는 mountLiveMap 이 [data-map-live] 안에 그린다.
-   * 예전에는 손으로 그린 SVG 도로 위에 마커를 %좌표로 얹은 '지도처럼 보이는 그림'이 있었는데,
-   * 실제 지도가 붙은 뒤로는 실패 시 그쪽으로 조용히 되돌아가 무엇을 보고 있는지 알 수 없었다.
-   * 이제 실패하면 가짜 지도 대신 상태를 그대로 표시한다.
-   */
+
   function mapMarkup(activeId='', detailed=false) {
     const list=detailed&&activeId?[getResult(activeId)].filter(Boolean):(state.results.length?state.results:DATA.hospitals.slice(0,3));
     const hasRoute=list.some(h=>h&&h.raw&&h.raw.route);
     return `<div class="map-wrap" data-map><span class="map-label">현재 위치 기준 · ${formatTime(state.refreshedAt)} 갱신</span><div class="map-live" data-map-live></div><div class="map-fallback" data-map-fallback>${icon('map',22)}<span>지도를 불러오는 중…</span></div>${hasRoute?congestionLegend():''}</div>`;
   }
 
-  /**
-   * 도식 지도 위에 실제 지도(Tmap)를 얹는다. 성공하면 .map-wrap 에 'live' 를 붙여
-   * 도식 배경/마커를 숨긴다. 실패하면 아무것도 하지 않아 기존 도식 지도가 그대로 남는다.
-   */
+
   function mountLiveMap(activeId='', detailed=false){
     const wrap=app.querySelector('[data-map]'), host=app.querySelector('[data-map-live]');
     if(!wrap||!host||!window.APP_MAP||!window.APP_API) return;
@@ -501,8 +440,7 @@
       onSelect:detailed?null:id=>selectResult(id,{scroll:true})
     }).then(res=>{
       wrap.classList.add('live');
-      // 경로선이 안 그려졌으면 그 이유를 지도 위 라벨에 그대로 띄운다.
-      // 조용히 직선거리 ETA로 넘어가면 사용자는 "경로가 왜 안 나오지"만 알게 된다.
+
       const label=wrap.querySelector('.map-label');
       if(label&&res&&!res.hasRoute){
         label.textContent=(window.APP_API.routeBlockedReason&&window.APP_API.routeBlockedReason())
@@ -511,7 +449,7 @@
     }).catch(err=>{ console.warn('[app] 실제 지도를 불러오지 못했습니다.',err); fail('지도를 불러오지 못했습니다. 네트워크와 백엔드 연결을 확인해 주세요.'); });
   }
 
-  /** 결과 카드/지도 마커/점 표시를 한 곳에서 바꾼다. 지도 마커 클릭도 이 경로를 탄다. */
+
   function selectResult(id,{scroll=false}={}){
     if(!id||state.activeResult===id) return;
     state.activeResult=id; state.selected=id;
@@ -521,10 +459,7 @@
     if(scroll) app.querySelector(`[data-hospital-card="${id}"]`)?.scrollIntoView({behavior:'smooth',inline:'center',block:'nearest'});
     mountLiveMap(id);
   }
-  /**
-   * 병상 0 / 음수 표시. 음수를 '가용 없음'으로 적으면 진료가 가능한 병원을
-   * 사용자가 지레 지워 버린다. 대기 인원 추정이라는 사실을 그대로 쓴다.
-   */
+
   function bedSignalChip(h){
     const s=h.bedSignal; if(!s||!s.label) return '';
     const cls={queued:'warn',backlog:'danger',zero:'warn',unknown:'muted'}[s.level]||'';
@@ -546,7 +481,7 @@
     return `<article class="hospital-slide ${h.best?'best':''} ${h.grade==='B'?'grade-b':''} ${h.deprioritized?'deprioritized':''} ${state.activeResult===h.id?'active':''}" data-hospital-card="${h.id}"><div class="hospital-top"><span class="rank-badge">${h.rank}</span><div class="hospital-name">${h.best?`<span class="best-badge">${icon('crown',13,'#fff')} BEST 추천</span>`:''}<h3>${esc(h.name)}</h3><p>${esc(h.centerType)} · ${esc(h.short)}</p></div><span class="status-pill ${statusClass}">${esc(statusLabel)}</span></div><div class="metric-grid"><div class="mini-metric"><span>예상 시간</span><strong>${h.eta}분</strong></div><div class="mini-metric"><span>거리</span><strong>${h.distanceKm.toFixed(1)}km</strong></div><div class="mini-metric" title="${scoreHint}"><span>종합 점수</span><strong>${h.total}점</strong></div></div>${bedSignalChip(h)}<div class="reason-mini">${h.reasons.slice(0,3).map(r=>`<span>${esc(r)}</span>`).join('')}</div><div class="freshness">${icon('clock',12)} 현재 데이터 기준 · ${agoText(h.updatedMinutes)} · ${esc(h.status)}</div><div class="hospital-actions single"><button class="btn btn-secondary report-button" data-report="${h.id}">${icon('info',16)} 추천 리포트</button></div></article>`;
   }
 
-  /** 어떤 가중치로 매긴 순위인지. 중증 모드는 반드시 그 사실과 한계를 함께 알린다. */
+
   function modeBanner(){
     const mode=state.recommendationMeta&&state.recommendationMeta.mode;
     if(!mode) return '';
@@ -559,7 +494,7 @@
     </div>`;
   }
 
-  /** 추천 6단계. 결과가 적을 때 그게 고장이 아니라 필터 결과임을 보여 준다. */
+
   function pipelineMarkup(){
     const steps=(state.recommendationMeta&&state.recommendationMeta.pipeline)||[];
     if(!steps.length) return '';
@@ -568,7 +503,7 @@
     </details>`;
   }
 
-  /** A등급 후보가 없으면 Best 를 만들어 내지 않는다는 사실을 화면에도 남긴다. */
+
   function bestNotice(){
     const meta=state.recommendationMeta;
     if(!meta||!state.results.length||meta.hasBest) return '';
@@ -577,21 +512,19 @@
   function getResult(id){return state.results.find(h=>h.id===id)||state.results[0];}
 
   function renderResults(){
-    // 결과가 없으면(새로고침·직접 진입) 백엔드에서 다시 받아 그린다.
+ 
     if(!state.results.length){ loadRecommendations().then(()=>renderResults()).catch(err=>console.warn('[app] 추천 조회 실패',err)); }
     app.innerHTML=shell(`<div class="page compact"><div class="risk-banner ${state.highRisk?'show':''}" data-risk-banner><span>${icon('alert',19)}</span><div><strong>고위험 신호가 감지되었습니다.</strong><p>119 연락을 우선하고, 아래 병원 후보는 보조 정보로 확인하세요.</p><div class="risk-actions"><button class="btn btn-danger" style="min-height:36px;padding:0 12px" data-route="/emergency">119 연락</button></div></div></div>${(DATA.currentWeather&&DATA.currentWeather.rainRisk>=1)?`<div class="radius-banner rain-banner">${icon('rain',15)}<span>비 소식이 있어요. 외출 전 우산을 챙기세요.</span></div>`:''}<div class="results-head"><div><p class="eyebrow">추천 결과</p><h1 class="page-title" style="margin-bottom:4px">적합 후보 ${state.results.length}곳</h1><p class="page-subtitle">의료 자원과 실제 도착 가능성을 함께 비교했어요.</p></div><div class="results-tools"><button class="refresh-btn" data-refresh>${icon('refresh',16)} 갱신</button>${DATA.currentWeather?`<div class="results-weather-mini" aria-label="현재 날씨"><span>날씨 :</span>${icon(DATA.currentWeather.icon||'clear',20)}<strong>${esc(DATA.currentWeather.label||'')}</strong></div>`:''}</div></div>${modeBanner()}${state.radiusExpanded?`<div class="radius-banner">${icon('info',15)}<span>초기 5km 안에 적합 후보가 부족해 검색 범위를 ${state.radiusKm}km까지 확대했습니다.</span></div>`:''}${bestNotice()}${resourceHolderBanner()}${pipelineMarkup()}${mapMarkup(state.activeResult)}<div class="hospital-carousel" id="hospital-carousel">${state.results.map(hospitalCard).join('')}</div><div class="carousel-dots">${state.results.map(h=>`<span class="${state.activeResult===h.id?'active':''}" data-dot="${h.id}"></span>`).join('')}</div><div class="data-note">순위는 종합 점수 순입니다. 점수에는 자원 적합성·병상 여유·도착시간·응급센터 역량·데이터 최신성이 함께 반영됩니다. 병상이 0이거나 음수로 보고된 곳도 후보에는 남겨 두고 감점만 했습니다(음수는 대기 인원 표기로 봅니다). 다만 B등급은 필요한 병상을 병원이 보고하지 않아 확인되지 않은 곳이니, 점수가 높아도 출발 전 전화로 확인해 주세요.</div></div>`,{title:'추천 결과',subtitle:`${formatTime(state.refreshedAt)} 기준`,tab:'find',action:`<div class="fixed-action-bar with-tabs result-select-bar"><button class="btn btn-primary btn-block" data-confirm-hospital>선택한 병원으로 이동 ${icon('arrow',18,'#fff')}</button></div>`});
     bindResults();
     mountLiveMap(state.activeResult);
   }
 
-  // 상위 후보 경로 보강은 백엔드 추천 엔진이 담당한다 (attach_routes + route_candidates).
+
   function cfgRadius(){ return (window.APP_CONFIG&&window.APP_CONFIG.radiusKm)||20; }
   function bindResults(){
     const carousel=document.getElementById('hospital-carousel');
     const setActive=id=>selectResult(id);
     app.querySelectorAll('[data-hospital-card]').forEach(c=>c.onclick=e=>{if(e.target.closest('button'))return;setActive(c.dataset.hospitalCard);});
-    // 스크롤 중에도 바로 따라오게 한다 (기존 80ms 디바운스는 한 박자 늦게 느껴진다).
-    // 탭이 숨겨지면 rAF 가 멈추므로 그때는 타이머로 대체한다.
     let pending=false;
     const syncActive=()=>{pending=false;const mid=carousel.scrollLeft+carousel.clientWidth/2;let best=null,dist=Infinity;
       carousel.querySelectorAll('[data-hospital-card]').forEach(c=>{const d=Math.abs(c.offsetLeft+c.offsetWidth/2-mid);if(d<dist){dist=d;best=c;}});
@@ -606,21 +539,14 @@
       catch(err){ console.warn('[app] 갱신 실패, 직전 데이터를 유지합니다.',err); toast('최신 정보를 받지 못해 직전 데이터를 유지합니다.'); refresh.classList.remove('loading'); refresh.disabled=false; }};
   }
 
-  /**
-   * 요구 자원을 보고했지만 갱신이 멈춰 순위에서 밀린 기관 안내.
-   * 화상처럼 그 자원을 가진 병원이 서울에 한 곳뿐인 경우, 순위에서 빠졌다고 화면에서
-   * 지워 버리면 선택지가 사라진다. 순위는 그대로 두고 사실만 따로 알린다.
-   */
+
   function resourceHolderBanner(){
     const list=(state.recommendationMeta&&state.recommendationMeta.resourceHolders)||[];
     if(!list.length) return '';
     return list.map(n=>`<div class="radius-banner holder-banner">${icon('alert',15)}<span><strong>${esc(n.hospital_name)}</strong>${n.distance_km!=null?` (${Number(n.distance_km).toFixed(1)}km)`:''}에 ${esc(n.resource)} ${esc(n.value)} 기록이 있으나, ${esc(n.reason)}</span></div>`).join('');
   }
 
-  /**
-   * 병상 0 / 음수를 어떻게 해석했는지 리포트에 그대로 적는다.
-   * 숫자만 보여 주면 "-3자리"가 화면에 그대로 나가 사용자가 오해한다.
-   */
+
   function bedSignalDetail(h){
     const s=h.bedSignal; if(!s||s.level==='ok') return '';
     const rows=[];
@@ -640,36 +566,32 @@
       <p class="score-formula">${esc(policy)}</p>`;
   }
 
-  /** 자원 판독 결과(어느 컬럼을 무슨 값으로 읽었는지)를 표로 보여준다. 근거의 핵심이다. */
+
   function resourceReadingsMarkup(h){
     const rows=(h.evidence&&h.evidence.resource_readings)||[];
     if(!rows.length) return '';
-    // 백엔드 value_text 는 "13개" / "가용" / "정보 없음" 처럼 이미 한국어다.
-    // 개수형만 단위를 떼고 숫자로 보여 주고, 상태 문구는 그대로 둔다.
+
     const valueText=v=>/^\d+개$/.test(v||'')?v.slice(0,-1):esc(v||'-');
     return `<div class="section-head"><div><h2 class="section-title">자원 판독</h2></div></div>
       <div class="reading-table">${rows.map(r=>`<div class="reading-row"><span class="reading-name">${esc(r.label||r.column)}</span><span class="reading-value">${valueText(r.value_text)}</span></div>`).join('')}</div>`;
   }
 
-  /**
-   * 추천 리포트. 점수 구성·수식·자원 판독을 백엔드 evidence 에서 그대로 가져와 보여준다.
-   * (목록은 include_detail=false 로 가볍게 받고, 이 화면에 들어올 때만 true 로 다시 받는다)
-   */
+
   function renderReport(id){
     const h=getResult(id); if(!h)return go('/results');state.selected=h.id;
-    // 상세를 아직 안 받았으면 받아서 다시 그린다.
+
     if(!h.evidence && !state.reportLoading){
       state.reportLoading=true;
       loadRecommendations({detail:true}).then(()=>{state.reportLoading=false;renderReport(id);})
         .catch(err=>{state.reportLoading=false;console.warn('[app] 리포트 상세 조회 실패',err);});
     }
     const metrics=[['clock','이동 시간',`${h.eta}분 · ${h.distanceKm.toFixed(1)}km`],['check','가용 정보',`${h.status} · ${agoText(h.updatedMinutes)}`],['heart','필요 자원',state.required.bedLabel],['medical','응급센터',h.centerType]];
-    // 백엔드 label 은 대리 산정 시 "가용성 대리값"으로 바뀌므로 key 로 잡는다.
+
     const labelMap={clinical_fit:'진료 적합도',availability:'응급실 이용 가능성',eta_traffic:'이동 편의성',center_capability:'응급센터 역량',freshness:'정보 신뢰도',route_weather_stability:'이동 환경'};
     const scores=(h.scoreBreakdown||[]).map(s=>[labelMap[s.key]||s.label,s.score,s.max_score,s.formula]);
     const filteredReasons=h.reasons||[];
     const mode=state.recommendationMeta&&state.recommendationMeta.mode;
-    // 같은 병원도 모드에 따라 점수가 달라진다. 어떤 배점으로 매긴 점수인지 함께 적는다.
+
     const modeLine=mode?`<p class="score-mode ${mode.severe?'severe':''}">${esc(mode.label)} 기준 · ${mode.weights.map(w=>`${esc(w.label)} ${Math.round(w.weight)}%`).join(' · ')}</p>`:'';
     app.innerHTML=shell(`<div class="page compact report-shell"><div class="report-summary" style="${h.best?'':'background:linear-gradient(145deg,#7c78a8,#9a96bb)'}"><span class="best-badge">${icon(h.best?'crown':'info',13,'#fff')} ${h.best?'BEST 추천':h.grade==='B'?'우선 확인 후보':'추천 병원'}</span><h2>${esc(h.name)}</h2><p>${esc(h.address)}</p></div><div class="report-metrics">${metrics.map(([ico,t,v])=>`<div class="report-metric"><span class="metric-icon">${icon(ico,17)}</span><strong>${t}</strong><span>${esc(v)}</span></div>`).join('')}</div><div class="score-breakdown"><h3>종합 점수 ${h.total}점</h3>${modeLine}${scores.length?scores.map(([n,v,m,f])=>`<div class="score-row"><span>${esc(n)}</span><div class="score-track"><div class="score-fill" style="width:${m?Math.round((v/m)*100):0}%"></div></div><strong>${Math.round(v)}/${Math.round(m)}</strong></div>`).join(''):'<p class="score-formula">상세 근거를 불러오는 중…</p>'}</div>${bedSignalDetail(h)}<div class="section-head"><div><h2 class="section-title">추천 이유</h2></div></div><div class="reason-mini" style="flex-wrap:wrap;overflow:visible">${filteredReasons.map(r=>`<span>${esc(r)}</span>`).join('')}</div>${resourceReadingsMarkup(h)}${(h.warnings||[]).length?`<div class="resource-row unknown"><strong>주의</strong><span>${h.warnings.map(w=>esc(typeof w==='string'?w:(w.text||w.message||''))).join(' · ')}</span></div>`:''}<div class="ai-summary"><span class="round-icon" style="width:34px;height:34px;border-radius:11px;flex:0 0 auto">${icon('chat',17)}</span><p><strong style="display:block;margin-bottom:3px;color:var(--ink)">종합 의견</strong>${esc(h.summary||'상세 근거를 불러오는 중입니다.')}</p></div><div class="compact-actions"><button class="btn btn-primary" data-select-report>병원 선택</button><button class="btn btn-outline" data-call="${h.phone}">${icon('phone',17)} 응급실 전화</button></div><div class="notice" style="margin-top:11px">${icon('info',15)}<span>추천은 탐색 보조 정보이며 의료진 진단과 병원 수용 확정을 의미하지 않습니다.</span></div></div>`,{title:'추천 리포트',back:true,close:true,noTabs:true});
     app.querySelector('[data-select-report]').onclick=()=>{saveRecentHospital(h);go(`/transport/${h.id}`);};
@@ -782,7 +704,7 @@
     app.querySelectorAll('[data-back]').forEach(el=>el.onclick=()=>history.length>1?history.back():go('/home'));
     app.querySelectorAll('[data-close-report]').forEach(el=>el.onclick=()=>go('/results'));
     app.querySelectorAll('[data-account]').forEach(el=>el.onclick=()=>go('/account'));
-    // 헤더 119 버튼. 바로 걸지 않고 안내 화면을 거친다 — 오탭으로 신고가 나가면 안 된다.
+
     app.querySelectorAll('[data-go-119]').forEach(el=>el.onclick=()=>go('/emergency'));
   }
 
@@ -791,8 +713,7 @@
     if(page==='login'&&store.get('er_auto_login')==='1'&&state.memberType==='member'){go('/home');return;}const routes={login:renderLogin,signup:renderSignup,home:renderHome,profiles:renderProfiles,policy:renderPolicy,search:renderSearch,results:renderResults,report:()=>renderReport(parts[1]),map:()=>renderMap(parts[1]),transport:()=>renderTransport(parts[1]),ambulance:()=>renderAmbulance(parts[1]),complete:()=>renderComplete(decodeURIComponent(parts[1]||'이동')), 'ai-access':renderAIAccess,chatbot:renderChatbot,emergency:renderEmergency,account:renderAccount};
     (routes[page]||renderHome)();bindCommon();
   }
-  // 저장된 실제 위치가 있으면 조회 기준 좌표로 먼저 심어 둔다.
-  // 이게 없으면 api.js 가 data.js 기본 좌표로 병원을 불러와 출발지와 어긋난다.
+
   if(state.locationConfirmed) rememberLocation(state.location);
   window.addEventListener('hashchange',route);route();
   window.APP_LIVE_REFRESH=()=>{const page=(location.hash.replace(/^#/,'')||'').split('/').filter(Boolean)[0];if(page==='results'||page==='report'){loadRecommendations().then(route).catch(err=>console.warn('[app] 실시간 갱신 재조회 실패',err));}};

@@ -1,17 +1,3 @@
-"""FastAPI 진입점.
-
-실행:
-    cd backend
-    python -m uvicorn app.main:app --reload --port 8000
-
-이 API는 공공 데이터를 직접 수집하지 않는다. Timer Trigger → Event Hub →
-Event Hub Trigger 파이프라인이 채워 둔 bed_status_latest만 읽는다.
-
-수집 대상이 아닌 외부 서비스는 요청 시점에 부른다 — 출발지가 사용자마다 다른 Tmap,
-음성이 요청에만 실려 오는 Speech(STT/TTS), 증상 문장을 넘겨야 하는 Foundry 에이전트가
-그렇다. 셋 다 미리 적재할 수 없다는 공통점이 있다.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -31,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 API_PREFIX = "/api/v1"
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -39,7 +24,7 @@ async def lifespan(app: FastAPI):
         db.init_schema()
     try:
         db.get_pool()
-    except Exception:  # noqa: BLE001 - DB가 늦게 떠도 앱은 기동시키고 /health로 노출
+    except Exception:  
         logger.exception("기동 시 PostgreSQL 연결 실패 (요청 시 재시도)")
     yield
     db.close_pool()
@@ -59,9 +44,8 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),
         allow_credentials=True,
-        # 증상 분류(/triage)는 POST라 GET만 열어 두면 브라우저에서 막힌다.
         allow_methods=["GET", "POST"],
-        allow_headers=["*"],
+        allow_headers=["*"]
     )
     app.include_router(health.router)
     app.include_router(hospitals.router, prefix=API_PREFIX)

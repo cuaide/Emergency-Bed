@@ -1,5 +1,3 @@
-"""FastAPI 응답 스키마 (Pydantic v2)."""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -9,31 +7,31 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class BedStatus(BaseModel):
-    """bed_status_latest + hospitals 조인 결과 1건."""
+    """One row of the bed_status_latest + hospitals join."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    hpid: str = Field(description="응급의료기관 코드")
-    duty_name: str | None = Field(default=None, description="기관명")
+    hpid: str = Field(description="Emergency medical institution code")
+    duty_name: str | None = Field(default=None, description="Institution name")
     sido: str | None = None
     sigungu: str | None = None
-    duty_addr: str | None = Field(default=None, description="주소")
-    duty_tel3: str | None = Field(default=None, description="응급실 전화번호")
-    duty_emcls_name: str | None = Field(default=None, description="응급의료기관 분류")
+    duty_addr: str | None = Field(default=None, description="Address")
+    duty_tel3: str | None = Field(default=None, description="ER phone number")
+    duty_emcls_name: str | None = Field(default=None, description="Emergency institution classification")
     latitude: float | None = None
     longitude: float | None = None
 
-    hvidate: datetime = Field(description="병원이 입력한 정보 갱신 시각")
-    hvec: int | None = Field(default=None, description="응급실 일반 가용 병상")
-    hvoc: int | None = Field(default=None, description="수술실 가용")
-    hvcc: int | None = Field(default=None, description="신경외과 중환자실 가용")
-    hvncc: int | None = Field(default=None, description="신생아 중환자실 가용")
-    hvccc: int | None = Field(default=None, description="흉부외과 중환자실 가용")
-    hvicc: int | None = Field(default=None, description="일반 중환자실 가용")
-    hvgc: int | None = Field(default=None, description="입원실 가용")
-    hvs01: int | None = Field(default=None, description="응급실 기준 병상 수")
+    hvidate: datetime = Field(description="Time the hospital last updated the information")
+    hvec: int | None = Field(default=None, description="Available ER general beds")
+    hvoc: int | None = Field(default=None, description="Available operating rooms")
+    hvcc: int | None = Field(default=None, description="Available neurosurgical ICU beds")
+    hvncc: int | None = Field(default=None, description="Available neonatal ICU beds")
+    hvccc: int | None = Field(default=None, description="Available thoracic surgery ICU beds")
+    hvicc: int | None = Field(default=None, description="Available general ICU beds")
+    hvgc: int | None = Field(default=None, description="Available inpatient beds")
+    hvs01: int | None = Field(default=None, description="ER reference bed count")
 
-    # 세부 가용 병상 hv1 ~ hv12 (원본 값은 raw JSONB에도 보존)
+    # Detailed available beds hv1 ~ hv12 (original values are also preserved in raw JSONB)
     hv1: int | None = None
     hv2: int | None = None
     hv3: int | None = None
@@ -47,66 +45,58 @@ class BedStatus(BaseModel):
     hv11: int | None = None
     hv12: int | None = None
 
-    hvctayn: bool | None = Field(default=None, description="CT 가용")
-    hvmriayn: bool | None = Field(default=None, description="MRI 가용")
-    hvangioayn: bool | None = Field(default=None, description="혈관촬영기 가용")
-    hvventiayn: bool | None = Field(default=None, description="인공호흡기 가용")
-    hvamyn: bool | None = Field(default=None, description="구급차 가용")
-    hvdnm: str | None = Field(default=None, description="당직의")
+    hvctayn: bool | None = Field(default=None, description="CT available")
+    hvmriayn: bool | None = Field(default=None, description="MRI available")
+    hvangioayn: bool | None = Field(default=None, description="Angiography available")
+    hvventiayn: bool | None = Field(default=None, description="Ventilator available")
+    hvamyn: bool | None = Field(default=None, description="Ambulance available")
+    hvdnm: str | None = Field(default=None, description="On-duty doctor")
 
     collected_at: datetime | None = None
     updated_at: datetime | None = None
-    is_stale: bool = Field(default=False, description="갱신이 지연된 데이터인지")
+    is_stale: bool = Field(default=False, description="Whether the data's update is delayed")
 
 
 class BedStatusNearby(BedStatus):
-    distance_km: float = Field(description="요청 좌표로부터의 직선 거리(km)")
+    distance_km: float = Field(description="Straight-line distance from the requested coordinates (km)")
 
 
 class CongestionSegment(BaseModel):
-    """지체(3) 이상인 혼잡 구간 하나."""
+    """A single congested segment at level 3 (delayed) or above."""
 
     road_name: str
     distance_m: int | None = None
-    congestion: int = Field(description="0 정보없음 · 1 원활 · 2 서행 · 3 지체 · 4 정체")
+    congestion: int = Field(description="0 no info · 1 smooth · 2 slow · 3 delayed · 4 jammed")
     congestion_label: str
     speed_kmh: float | None = None
 
 
 class CongestionSpan(BaseModel):
-    """path 배열의 [start, end] 구간에 적용되는 혼잡도. 지도에 색으로 그린다."""
+    """Congestion level applied to the [start, end] range of the path array. Drawn as colors on the map."""
 
     start: int
     end: int
-    congestion: int = Field(description="0 정보없음 · 1 원활 · 2 서행 · 3 지체 · 4 정체")
+    congestion: int = Field(description="0 no info · 1 smooth · 2 slow · 3 delayed · 4 jammed")
 
 
 class RouteSummary(BaseModel):
-    """Tmap 자동차 경로 요약 (실시간 교통 반영)."""
+    """Tmap car route summary (reflects real-time traffic)."""
 
-    path: list[list[float]] = Field(
-        default_factory=list, description="경로 좌표 [[경도, 위도], ...]"
-    )
-    path_congestion: list[CongestionSpan] = Field(
-        default_factory=list, description="path 인덱스 기준 구간별 혼잡도"
-    )
-    distance_m: int = Field(description="총 거리(m)")
-    distance_km: float = Field(description="총 거리(km)")
-    duration_s: int = Field(description="예상 소요시간(초)")
-    duration_min: float = Field(description="예상 소요시간(분)")
-    taxi_fare: int | None = Field(default=None, description="예상 택시요금(원)")
-    toll_fare: int | None = Field(default=None, description="예상 통행료(원)")
-    congestion_level: int = Field(default=0, description="경로 전체 중 최고 혼잡도 (0~4)")
-    congestion_label: str = Field(default="정보없음", description="congestion_level 한글 표기")
-    jammed_segments: list[CongestionSegment] = Field(
-        default_factory=list, description="지체(3) 이상 구간만"
-    )
+    path: list[list[float]] = Field(default_factory=list, description="Route coordinates [[lon, lat], ...]")
+    path_congestion: list[CongestionSpan] = Field(default_factory=list, description="Per-segment congestion, indexed by path")
+    distance_m: int = Field(description="Total distance (m)")
+    distance_km: float = Field(description="Total distance (km)")
+    duration_s: int = Field(description="Estimated travel time (seconds)")
+    duration_min: float = Field(description="Estimated travel time (minutes)")
+    taxi_fare: int | None = Field(default=None, description="Estimated taxi fare (KRW)")
+    toll_fare: int | None = Field(default=None, description="Estimated toll (KRW)")
+    congestion_level: int = Field(default=0, description="Highest congestion level along the whole route (0~4)")
+    congestion_label: str = Field(default="정보없음", description="Korean label for congestion_level")
+    jammed_segments: list[CongestionSegment] = Field(default_factory=list, description="Only segments at level 3 (delayed) or above")
 
 
 class BedStatusRoute(BedStatusNearby):
-    route: RouteSummary | None = Field(
-        default=None, description="경로 조회 실패 시 null (해당 후보는 목록 뒤로 밀림)"
-    )
+    route: RouteSummary | None = Field(default=None, description="null if the route lookup failed (that candidate is pushed to the end of the list)")
 
 
 class BedStatusList(BaseModel):
@@ -148,51 +138,49 @@ class HealthResponse(BaseModel):
 
 
 class MapConfig(BaseModel):
-    """브라우저 지도 SDK가 쓰는 공개 설정."""
+    tmap_app_key: str = Field(description="Tmap map SDK appKey")
 
-    tmap_app_key: str = Field(description="Tmap 지도 SDK appKey")
-
-
+# Place name/address → coordinates (first result of Tmap POI search)
 class PlaceResult(BaseModel):
-    """장소명/주소 → 좌표 (Tmap POI 검색 첫 결과)."""
 
-    name: str | None = Field(default=None, description="검색된 장소명")
+
+    name: str | None = Field(default=None, description="Name of the place found")
     latitude: float
     longitude: float
 
-
+# KMA ultra-short-term observations
 class WeatherCurrent(BaseModel):
-    """기상청 초단기실황."""
+    
 
     nx: int
     ny: int
-    base_datetime: datetime = Field(description="관측 발표 시각")
-    t1h: float | None = Field(default=None, description="기온(°C)")
-    rn1: float | None = Field(default=None, description="1시간 강수량(mm)")
-    reh: float | None = Field(default=None, description="습도(%)")
-    wsd: float | None = Field(default=None, description="풍속(m/s)")
-    vec: float | None = Field(default=None, description="풍향(deg)")
-    pty: int | None = Field(default=None, description="강수형태 코드")
-    pty_label: str | None = Field(default=None, description="강수형태(한글)")
+    base_datetime: datetime = Field(description="Observation release time")
+    t1h: float | None = Field(default=None, description="Temperature (°C)")
+    rn1: float | None = Field(default=None, description="1-hour precipitation (mm)")
+    reh: float | None = Field(default=None, description="Humidity (%)")
+    wsd: float | None = Field(default=None, description="Wind speed (m/s)")
+    vec: float | None = Field(default=None, description="Wind direction (deg)")
+    pty: int | None = Field(default=None, description="Precipitation type code")
+    pty_label: str | None = Field(default=None, description="Precipitation type (Korean label)")
     collected_at: datetime | None = None
 
-
+# KMA short-term forecast, hourly
 class WeatherForecastPoint(BaseModel):
-    """기상청 단기예보 1시간 단위."""
+
 
     nx: int
     ny: int
-    base_datetime: datetime = Field(description="예보 발표 시각")
-    fcst_datetime: datetime = Field(description="예보 대상 시각")
-    tmp: float | None = Field(default=None, description="기온(°C)")
-    reh: float | None = Field(default=None, description="습도(%)")
-    wsd: float | None = Field(default=None, description="풍속(m/s)")
-    pop: int | None = Field(default=None, description="강수확률(%)")
-    pty: int | None = Field(default=None, description="강수형태 코드")
+    base_datetime: datetime = Field(description="Forecast release time")
+    fcst_datetime: datetime = Field(description="Forecast target time")
+    tmp: float | None = Field(default=None, description="Temperature (°C)")
+    reh: float | None = Field(default=None, description="Humidity (%)")
+    wsd: float | None = Field(default=None, description="Wind speed (m/s)")
+    pop: int | None = Field(default=None, description="Probability of precipitation (%)")
+    pty: int | None = Field(default=None, description="Precipitation type code")
     pty_label: str | None = None
-    sky: int | None = Field(default=None, description="하늘상태 코드")
+    sky: int | None = Field(default=None, description="Sky condition code")
     sky_label: str | None = None
-    pcp: str | None = Field(default=None, description="1시간 강수량")
+    pcp: str | None = Field(default=None, description="1-hour precipitation")
     collected_at: datetime | None = None
 
 
@@ -211,25 +199,15 @@ class WeatherCoverage(BaseModel):
     forecast_rows: int
     forecast_base: datetime | None = None
 
-
+# Request that takes symptoms as text input
 class TriageRequest(BaseModel):
-    """텍스트로 증상을 입력받는 요청."""
+    
 
-    message: str = Field(min_length=1, max_length=2000, description="증상 설명")
-    generate_audio: bool = Field(default=True, description="안내 음성(WAV) 생성 여부")
+    message: str = Field(min_length=1, max_length=2000, description="Symptom description")
+    generate_audio: bool = Field(default=True, description="Whether to generate guidance audio (WAV)")
 
-
+# Symptom classification result
 class TriageResponse(BaseModel):
-    """증상 분류 결과.
-
-    triage의 내부 구조는 Foundry 에이전트가 정하므로 여기서 고정하지 않는다.
-    에이전트 프롬프트를 바꿀 때마다 스키마를 따라 고치는 일을 피하기 위해서다.
-    """
-
-    recognized_text: str | None = Field(
-        default=None, description="STT로 인식된 문장 (음성 입력일 때만)"
-    )
-    triage: dict[str, Any] = Field(description="에이전트 분류 결과")
-    audio_url: str | None = Field(
-        default=None, description="안내 음성 경로. 합성 실패 시 null"
-    )
+    recognized_text: str | None = Field(default=None, description="Text recognized by STT (voice input only)")
+    triage: dict[str, Any] = Field(description="Agent classification result")
+    audio_url: str | None = Field(default=None, description="Path to the guidance audio. null if synthesis failed")
